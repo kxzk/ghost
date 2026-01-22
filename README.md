@@ -1,6 +1,6 @@
 ![header](./images/header.png)
 
-> Background code agent that plans, tracks, and ships
+> Background agent that plans, tracks, and ships
 
 References
 
