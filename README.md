@@ -1,6 +1,6 @@
 ![header](./images/header.png)
 
-> Autonomous code agent that plans, tracks, and ships
+> Background code agent that plans, tracks, and ships
 
 References
 
