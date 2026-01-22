@@ -8,7 +8,13 @@ import modal
 
 app = modal.App.lookup(f"ghost-{token_urlsafe(4)}", create_if_missing=True)
 
-sb = modal.Sandbox.create(app=app)
+# verbose = True (see sandbox logs)
+sb = modal.Sandbox.create(app=app, verbose=True)
+# sb_id = sb.object_id
+
+# ... later in the program ...
+
+# sb2 = modal.Sandbox.from_id(sb_id)
 
 p = sb.exec("python", "-c", "print('hello')", timeout=3)
 print(p.stdout.read())
