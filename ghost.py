@@ -2,18 +2,21 @@
 # dependencies = ["modal"]
 # ///
 import os
+import sys
 import subprocess
 from secrets import token_urlsafe
 
 import modal
 
 
+def ghost_print(msg: str) -> None:
+    print(f"👻 {msg}")
+
+
 def get_remote_url() -> str:
     try:
         return subprocess.check_output(
-            ["git", "config", "--get", "remote.origin.url"],
-            stderr=subprocess.DEVNULL,
-            text=True,
+            ["git", "config", "--get", "remote.origin.url"], stderr=subprocess.DEVNULL, text=True
         ).strip()
     except subprocess.CalledProcessError as e:
         raise RuntimeError("Not in a git repository with a remote origin") from e
@@ -23,52 +26,50 @@ def get_repo_name(url: str) -> str:
     return url.removesuffix(".git").replace(":", "/").split("/")[-1]
 
 
-def main() -> None:
+def main(prompt: str) -> None:
+    modal.enable_output()
     url = get_remote_url()
     repo_name = get_repo_name(url)
     ghost_id = f"ghost-{token_urlsafe(4)}"
-    print(f"👻 [{ghost_id}] Cloning {repo_name}...")
+    ghost_print(f"[{ghost_id}] spawning sandbox -> {repo_name}...")
 
     image = (
-        modal.Image.debian_slim()
-        .apt_install("curl", "git")
+        modal.Image.debian_slim(python_version="3.12")
+        .apt_install("curl")
         .run_commands(
-            # github (gh) cli
             "curl -fsSL https://cli.github.com/packages/githubcli-archive-keyring.gpg | dd of=/usr/share/keyrings/githubcli-archive-keyring.gpg",
             "echo 'deb [arch=amd64 signed-by=/usr/share/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main' | tee /etc/apt/sources.list.d/github-cli.list > /dev/null",
-            "apt update && apt install gh -y",
-            # claude code
-            "curl -fsSL https://claude.ai/install.sh | bash",
         )
+        .apt_install("gh")
+        .uv_pip_install("claude-agent-sdk")
+        .add_local_dir("src", "/src")
     )
 
     app = modal.App.lookup(ghost_id, create_if_missing=True)
 
     sandbox = modal.Sandbox.create(
-        image=image,
-        secrets=[modal.Secret.from_name(os.environ["GHOST_SECRET_TOKEN"])],
-        app=app,
+        image=image, secrets=[modal.Secret.from_name(os.environ["GHOST_SECRET_TOKEN"])], app=app
     )
 
-    def run(cmd: str) -> str:
-        proc = sandbox.exec("bash", "-c", cmd)
-        stdout = proc.stdout.read()
-        proc.wait()
-        return stdout
+    ghost_print(f"[{ghost_id}] ghost clone -> {repo_name}...")
+    clone_proc = sandbox.exec("gh", "repo", "clone", url, f"/workspace/{repo_name}")
+    clone_proc.wait()
 
-    run(f"gh repo clone {url} /workspace/{repo_name}")
+    ghost_print(f"[{ghost_id}] ghost do -> {prompt}")
 
-    prompt = "Describe this repository in exactly one sentence."
-    result = run(f"""
-        export PATH="$HOME/.local/bin:$PATH"
-        cd /workspace/{repo_name}
-        echo "{prompt}" | claude -p --allowedTools "Read,Glob,Grep"
-    """)
+    proc = sandbox.exec("python", "/src/agent.py", prompt)
 
-    print(f"👻 [{ghost_id}] {result.strip()}")
+    for line in proc.stdout:
+        print(line, end="")
 
+    stderr = proc.stderr.read()
+    if stderr:
+        print(f"[stderr] {stderr}", file=sys.stderr)
+
+    proc.wait()
     sandbox.terminate()
 
 
 if __name__ == "__main__":
-    main()
+    prompt = sys.argv[1] if len(sys.argv) > 1 else "List my Linear issues"
+    main(prompt)
